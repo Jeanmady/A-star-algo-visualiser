@@ -3,132 +3,155 @@
 Hexagonal A* Pathfinding Visualiser
 ===================================
 
-This script runs the main visualisation loop for the hexagonal A* pathfinding
-demonstration. It integrates with the visualiser and a_star_hex modules
-to render a hex grid, perform the pathfinding step by step or instantly,
-and provide user interaction through keyboard input.
+This script serves as the main entry point for the pathfinding visualiser.
+It handles Pygame initialisation, event processing (keyboard inputs),
+and the main application loop. It integrates the algorithm logic from
+`a_star_hex.py` and the rendering logic from `visualiser.py` to create an
+interactive demonstration.
+
+The visualiser is configured to use a large, complex, maze style grid,
+which provides a test case for comparing the performance
+of Standard A* versus the improved Bidirectional A* search.
 """
 
 import pygame
-import visualiser  # Handles grid rendering and visualisation
-from a_star_hex import a_star_hex_search, a_star_hex_search_step
+import visualiser
+import random
+from a_star_hex import a_star_hex_search_step, bidirectional_a_star_hex_search_step
 
+def create_complex_grid(size, density=0.3):
+    """Creates a grid with randomly scattered obstacles.
 
-def create_grid(size):
-    """
-    Create a hexagonal grid with basic obstacle layout.
+    This environment serves as an ideal test case for bidirectional
+    search, as it creates a complex search space that forces the standard A*
+    algorithm to explore a massive number of nodes.
 
-    This helper function generates a hex grid using axial coordinates,
-    initialising all cells as walkable (0). A simple wall of obstacles
-    is then added to demonstrate pathfinding behavior.
+    Args:
+        size (int): The radius of the hexagonal grid to generate.
+        density (float, optional): The probability (0.0 to 1.0) that any given
+                                   hex will be an obstacle. Defaults to 0.3.
 
-    :param size: The radius (in hexes) of the grid to generate.
-    :return: A dictionary mapping coordinate tuples (q, r) to cell states.
-             A value of 0 indicates a free cell, while 1 indicates an obstacle.
+    Returns:
+        dict: A dictionary mapping (q, r) coordinate tuples to cell states (0=walkable, 1=obstacle).
     """
     grid = {}
     for q in range(-size, size + 1):
         for r in range(-size, size + 1):
-            # Skip cells outside the hexagonal boundary
-            if abs(q + r) > size:
+            if abs(q + r) > size: 
                 continue
-            grid[(q, r)] = 0
-
-    # Add a vertical wall of obstacles
-    for r in range(-5, 6):
-        grid[(3, r)] = 1
-
-    # Add a few additional obstacles for variation
-    grid[(4, -5)] = 1
-    grid[(2, 5)] = 1
-
+            if random.random() < density:
+                grid[(q, r)] = 1  # Obstacle
+            else:
+                grid[(q, r)] = 0  # Walkable
+            
     return grid
 
 
 def main():
-    """
-    Launch the Pygame hexagonal A* pathfinding visualizer.
-
-    This function initializes the display, handles the main game loop,
-    processes user input, and renders the grid each frame. It allows the
-    user to run the A* search algorithm step-by-step or instantly.
-
-    **Controls**
-      - **SPACE** : Start or pause step by step animation.
-      - **ENTER** : Solve the path instantly.
-      - **R**     : Reset the visualization.
-
-    :return: This function does not return a value.
-    """
-
-    # Initialize Pygame and display
+    """Initialises Pygame, sets up the application state, and runs the main loop."""
     pygame.init()
     screen = pygame.display.set_mode((visualiser.SCREEN_WIDTH, visualiser.SCREEN_HEIGHT))
     pygame.display.set_caption("Hexagonal A* Pathfinding Visualizer")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("Arial", 24)
+    font_large = pygame.font.SysFont("Arial", 32, bold=True)
 
-    # --- Simulation state variables ---
-    grid = create_grid(15)
-    start = (-5, 0)
-    end = (8, -2)
+    # --- Application State Variables ---
+    grid_size = 30
+    grid = create_complex_grid(grid_size, density=0.35)
+    
+    start = (-grid_size + 2, 0)
+    end = (grid_size - 2, 0)
 
-    path = None
-    open_set = None
-    closed_set = None
-
-    # Initialize the A* step generator
-    search_generator = a_star_hex_search_step(grid, start, end)
+    # Ensure start and end points are always walkable, even in a dense maze.
+    grid[start] = 0
+    grid[end] = 0
+    
+    # Variables to hold the current state of the search for visualisation.
+    path, open_fwd, closed_fwd, open_bwd, closed_bwd = None, None, None, None, None
+    search_generator = None
     animating = False
+    search_mode = 'A_STAR'
+    explored_count = 0
 
-    # --- Main event loop ---
+    def reset_search():
+        """Resets all search related state variables and creates a new search generator."""
+        nonlocal path, open_fwd, closed_fwd, open_bwd, closed_bwd, search_generator, animating, explored_count
+        path, open_fwd, closed_fwd, open_bwd, closed_bwd = None, None, None, None, None
+        animating = False
+        explored_count = 0
+        if search_mode == 'A_STAR':
+            search_generator = a_star_hex_search_step(grid, start, end)
+        else:
+            search_generator = bidirectional_a_star_hex_search_step(grid, start, end)
+
+    reset_search()
+
+    # --- Main Application Loop ---
     running = True
     while running:
+        # --- Event Handling ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-
-            # Handle keyboard input
             if event.type == pygame.KEYDOWN:
-                # SPACE toggles animation on/off
                 if event.key == pygame.K_SPACE:
                     animating = not animating
+                if event.key == pygame.K_r:
+                    # 'R' generates a new random maze and resets the search.
+                    grid = create_complex_grid(grid_size, density=0.35)
+                    grid[start] = 0; grid[end] = 0
+                    reset_search()
+                if event.key == pygame.K_1:
+                    search_mode = 'A_STAR'
+                    reset_search()
+                if event.key == pygame.K_2:
+                    search_mode = 'BIDIRECTIONAL'
+                    reset_search()
 
-                # ENTER solves the path instantly
-                elif event.key == pygame.K_RETURN:
-                    path = a_star_hex_search(grid, start, end)
-                    animating = False
-
-                # R resets the visualization
-                elif event.key == pygame.K_r:
-                    path, open_set, closed_set = None, None, None
-                    search_generator = a_star_hex_search_step(grid, start, end)
-                    animating = False
-
-        # Step the pathfinding algorithm frame by frame
+        # --- Algorithm Step ---
         if animating:
             try:
-                open_set, closed_set = next(search_generator)
+                # Get the next state from the current search generator.
+                result = next(search_generator)
+                if search_mode == 'A_STAR':
+                    open_fwd, closed_fwd, explored_count = result
+                    open_bwd, closed_bwd = None, None
+                else:
+                    open_fwd, closed_fwd, open_bwd, closed_bwd, explored_count = result
             except StopIteration as e:
-                # Retrieve the final path from the generator
+                # The generator is exhausted, meaning the search is complete.
                 path = e.value
                 animating = False
 
-        # --- Rendering ---
+        # --- Drawing ---
         screen.fill(visualiser.COLOUR_BACKGROUND)
-        visualiser.draw_hex_grid(screen, grid, start, end, path, open_set, closed_set)
+        
+        # Delegate all grid drawing to the visualiser module.
+        visualiser.draw_hex_grid(screen, grid, start, end, path, 
+                                open_fwd, closed_fwd, open_bwd, closed_bwd)
+        
+        # Render and draw UI text elements.
+        mode_text = f"Mode: {'Standard A*' if search_mode == 'A_STAR' else 'Bidirectional A*'}"
+        controls_text = "1: Standard A* | 2: Bidirectional A* | R: New Maze | SPACE: Animate"
+        text1 = font.render(mode_text, True, (255, 255, 255))
+        text2 = font.render(controls_text, True, (255, 255, 255))
+        screen.blit(text1, (10, 10))
+        screen.blit(text2, (10, 40))
 
-        # Draw on controls
-        text = font.render("SPACE: Animate | ENTER: Solve | R: Reset", True, (255, 255, 255))
-        screen.blit(text, (10, 10))
+        # Render and draw the live counter for explored nodes.
+        count_text_label = font.render("Nodes Explored:", True, (200, 200, 200))
+        count_text_value = font_large.render(str(explored_count), True, (255, 255, 255))
+        screen.blit(count_text_label, (10, 80))
+        screen.blit(count_text_value, (10, 110))
 
-        # Update display
+        # Update the full display surface to the screen.
         pygame.display.flip()
-        clock.tick(30)  # Limit frame rate (affects animation speed)
+        
+        # Limit the frame rate.
+        clock.tick(120)
 
-    # Clean up when the window is closed
     pygame.quit()
-
 
 if __name__ == '__main__':
     main()
